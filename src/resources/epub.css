@@ -1,0 +1,106 @@
+/* epub.css — EPUB interior styling aligned with the Verkilo editor standard:
+   Georgia serif body, proportional headings, and the named front-matter /
+   drop-cap / scene-break classes. */
+
+body {
+  font-family: Georgia, "Times New Roman", serif;
+  line-height: 1.5;
+  margin: 0 1em;
+  text-align: justify;
+  widows: 2;
+  orphans: 2;
+}
+
+h1, h2, h3, h4, h5, h6 {
+  font-family: Georgia, "Times New Roman", serif;
+  font-weight: normal;
+  text-align: center;
+  line-height: 1.2;
+  page-break-after: avoid;
+}
+h1 { font-size: 1.8em; margin: 2em 0 1.5em; page-break-before: always; }
+h2 { font-size: 1.4em; margin: 1.5em 0 1em; }
+h3 { font-size: 1.2em; }
+h4 { font-size: 1.05em; }
+h5, h6 { font-size: 1em; }
+
+p { margin: 0; text-indent: 1.5em; }
+/* First paragraph of a chapter / after a break is not indented. */
+h1 + p, h2 + p, h3 + p,
+.chapter-title + p,
+.scene-break + p { text-indent: 0; }
+
+/* Drop cap (Verkilo .dropcap) */
+.dropcap {
+  float: left;
+  font-size: 3.2em;
+  line-height: 0.8;
+  margin: 0.02em 0.06em 0 0;
+  font-weight: bold;
+}
+
+/* Scene break — a plain horizontal rule, gray (#808080). */
+hr {
+  border: 0;
+  border-top: 1px solid #808080;
+  color: #808080;
+  background-color: #808080;
+  margin: 1.5em 0;
+}
+
+/* Front matter — title page. Pandoc emits the section with class "titlepage".
+   Title + subtitle sit near the top; author and imprint are pushed to the foot
+   of the page; the copyright is hidden here (it lives on its own page). */
+.titlepage {
+  text-align: center;
+  min-height: 75vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;          /* center each line as a box (reader-robust) */
+  padding-top: 2em;
+}
+.titlepage > * { text-indent: 0; }            /* cancel the body's paragraph indent */
+.titlepage .title {
+  font-size: 2.2em;
+  margin: 0 0 0.3em;            /* subtitle sits right beneath the title */
+  page-break-before: avoid;
+}
+.titlepage .subtitle { font-size: 1.2em; font-style: italic; margin: 0; }
+.titlepage .author { margin-top: auto; font-size: 1.2em; }      /* -> foot of page */
+.titlepage .publisher {
+  margin: 0.6em 0 1.5em;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 0.95em;
+}
+.titlepage .rights { display: none; }   /* copyright lives on the copyright page */
+
+/* Hidden front-matter section heading (keeps pages out of the auto-title and
+   the ToC while still splitting them into their own EPUB files). Target the
+   heading element only — Pandoc also copies the class onto the wrapping
+   <section>, and hiding that would hide the page's content too. */
+h1.fm-head, h2.fm-head { display: none; }
+
+.copyright-page { font-size: 0.85em; text-align: left; }
+.copyright-page p { text-indent: 0; margin: 0.8em 0; }
+
+.dedication {
+  text-align: center;
+  font-style: italic;
+  margin-top: 6em;
+  text-indent: 0;
+}
+.dedication p { text-indent: 0; }
+
+.epigraph { margin: 2em 10%; font-style: italic; }
+.chapter-title { text-align: center; }
+
+blockquote { margin: 1em 2em; font-style: italic; }
+img { max-width: 100%; height: auto; }
+
+/* Cover — fill the reader viewport edge to edge (override the body margin and
+   give the SVG the full page height). preserveAspectRatio is "meet", so the
+   cover scales to fit without ever cropping the art. */
+body#cover { margin: 0; padding: 0; text-align: center; }
+#cover-image { height: 100vh; margin: 0; padding: 0; }
+#cover-image svg { width: 100%; height: 100%; }

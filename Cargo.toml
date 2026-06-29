@@ -1,0 +1,33 @@
+[package]
+name = "argraver"
+version = "0.1.0"
+edition = "2021"
+description = "Single-source book compiler: one Markdown manuscript + _metadata.yml -> EPUB and print PDF"
+license = "MIT"
+repository = ""
+default-run = "argraver"
+
+[lib]
+name = "argraver"
+path = "src/lib.rs"
+
+[[bin]]
+name = "argraver"
+path = "src/main.rs"
+
+[dependencies]
+# Front end: one parse, two back ends. Pinned — comrak's Options struct churns across releases.
+comrak = "0.52"
+
+# EPUB back end.
+epub-builder = "0.8"
+image = "0.25"
+
+# Metadata + CLI + errors.
+serde = { version = "1", features = ["derive"] }
+serde_yaml = "0.9" # deprecated upstream but chosen in the spec; revisit if it breaks
+clap = { version = "4", features = ["derive"] }
+anyhow = "1"
+
+[profile.release]
+opt-level = 3

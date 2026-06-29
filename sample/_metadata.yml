@@ -1,0 +1,39 @@
+# _metadata.yml — single source of truth for this book.
+# Standalone YAML (not Obsidian front matter); edit in nvim/VS Code.
+#   book:  the book's facts — consumed by the interior PDF, the EPUB, AND the cover.
+#   cover: cover-only design knobs — consumed by the print cover.
+# Facts live ONCE under book:; the cover reads them (never re-declares them).
+
+book:
+  title: The Prequel
+  subtitle: A Gendaldea Story
+  author: B. Wilson
+  publisher: Gendaldea Press
+  copyright: Copyright © 2026 B. Wilson
+  edition: First Edition
+  isbn: 978-0-00-000000-0
+  trim: digest          # pocket 5x8 | small-digest 5.25x8 | digest 5.5x8.5 | trade 6x9 | large 7x10
+  dedication: For those who came before.
+  description: |
+    A short prequel to the Star Couriers saga — the run that ended a career and
+    started a legend.
+
+    Scout captain Jake Marion is the Service at its best: he flies the hard
+    routes, reads a world true, and keeps his word where the brass has stopped
+    bothering. Then a careerist director hands him a prize mission — and an
+    order that forces a choice between his commission and the people who
+    trusted him.
+
+    A standalone story set before Book One.
+  # rights:      (optional — omit to use the generic "all rights reserved" warning)
+  # disclaimer:  (optional — omit to use the generic fiction disclaimer)
+
+cover:
+  series: Star Couriers
+  book_number: 0
+  page:
+    page_count: 50          # TODO: derive from the built interior PDF
+  background:
+    style: image
+    image: prequel-reader-magnet.png
+    # placement knobs to test: zoom, offset_x, offset_y

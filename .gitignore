@@ -1,0 +1,9 @@
+# Rust build artifacts
+/target
+
+# Build outputs (EPUB/PDF deliverables)
+/builds/*
+!/builds/.gitkeep
+
+# OS / editor cruft
+.DS_Store

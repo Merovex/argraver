@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+# book — build a manuscript into print/eBook deliverables from one _metadata.yml.
+#
+# Usage:
+#   book pdf        <input.md> [out.pdf]     interior PDF (Pandoc + Tectonic)
+#   book epub       <input.md> [out.epub]    EPUB 3 (Verkilo-standard, with cover)
+#   book cover      <input.md> [out.pdf]     print wraparound cover (cover.rb + Typst)
+#   book print-ready [--pdfx|--gray] <pdf> [out.pdf]   KDP/IngramSpark PDF
+#   book font       "Family Name"            install a Google font
+#   book all        <input.md>               pdf + epub (both reader deliverables)
+#
+# Metadata: a standalone _metadata.yml in the book root (book: facts, cover: design).
+#   Auto-discovered from the "<Project> - manuscript.md" name; override with BOOK_META.
+# Env: BOOK_MAINFONT/DISPLAYFONT/SUBHEADFONT, BOOK_TRIMWIDTH/TRIMHEIGHT,
+#      BOOK_PRINT=pdfx|gray (with `pdf`), BOOK_COVER (override cover image),
+#      BOOK_ICC (print-ready output intent), COVER_SIZE (eBook cover px).
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# --- shared helpers ---------------------------------------------------------
+project_of() { local b; b="$(basename "$1")"; b="${b% - manuscript.md}"; echo "${b%.md}"; }
+
+find_meta() { # find_meta <input.md> -> path to _metadata.yml (or empty)
+  if [ -n "${BOOK_META:-}" ]; then echo "$BOOK_META"; return; fi
+  local proj; proj="$(project_of "$1")"
+  local c
+  for c in "$HERE/Books/"*"/$proj/_metadata.yml" "$(dirname "$1")/_metadata.yml"; do
+    [ -f "$c" ] && { echo "$c"; return; }
+  done
+}
+
+yaml_get() { ruby -ryaml -e 'd=(YAML.load_file(ARGV[0]) rescue {})||{}; puts(d.dig(*ARGV[1..].map{|k|k})||"")' "$@" 2>/dev/null; }
+
+resize_cover() { # resize_cover <master> <out.jpg>
+  magick "$1" -resize "${COVER_SIZE:-1600x2560}" -colorspace sRGB -strip -quality 92 "$2"
+  echo "  cover: $2 ($(magick identify -format '%wx%h' "$2"))"
+}
+
+trim_dims() { # trim_dims <preset> -> "<width> <height>" in inches (empty if unknown)
+  case "$1" in
+    pocket)        echo "5in 8in" ;;
+    small-digest)  echo "5.25in 8in" ;;
+    digest)        echo "5.5in 8.5in" ;;
+    trade)         echo "6in 9in" ;;
+    large)         echo "7in 10in" ;;
+    *)             echo "" ;;
+  esac
+}
+
+# --- pdf --------------------------------------------------------------------
+cmd_pdf() {
+  local input="${1:?usage: book pdf <input.md> [out.pdf]}" output="${2:-${1%.*}.pdf}"
+  local meta; meta="$(find_meta "$input")"
+  local prose; prose="$(mktemp --suffix=.md)"; ruby "$HERE/bin/strip-fm" "$input" > "$prose"
+  local args=( "$prose" --from=markdown+smart
+    --template="$HERE/_templates/classic.latex" --lua-filter="$HERE/_templates/classic-filters.lua"
+    --top-level-division=chapter --pdf-engine=tectonic -o "$output" )
+  [ -n "$meta" ] && args+=( --metadata-file="$meta" )
+  [ -n "${BOOK_MAINFONT:-}" ]    && args+=( -V mainfont="$BOOK_MAINFONT" )
+  [ -n "${BOOK_DISPLAYFONT:-}" ] && args+=( -V displayfont="$BOOK_DISPLAYFONT" )
+  [ -n "${BOOK_SUBHEADFONT:-}" ] && args+=( -V subheadfont="$BOOK_SUBHEADFONT" )
+  # Trim: explicit dims > BOOK_TRIM preset > book.trim in metadata > digest
+  local tw="${BOOK_TRIMWIDTH:-}" th="${BOOK_TRIMHEIGHT:-}"
+  if [ -z "$tw" ] && [ -z "$th" ]; then
+    local tname="${BOOK_TRIM:-}"
+    [ -z "$tname" ] && [ -n "$meta" ] && tname="$(yaml_get "$meta" book trim)"
+    [ -z "$tname" ] && tname="digest"
+    local dims; dims="$(trim_dims "$tname")"
+    if [ -n "$dims" ]; then tw="${dims% *}"; th="${dims#* }"
+    else echo "  unknown trim '$tname' (pocket|small-digest|digest|trade|large)" >&2; fi
+  fi
+  [ -n "$tw" ] && args+=( -V trimwidth="$tw" )
+  [ -n "$th" ] && args+=( -V trimheight="$th" )
+  echo "Building $output ..."; [ -n "$meta" ] && echo "  metadata: $meta"
+  pandoc "${args[@]}"; rm -f "$prose"; echo "Wrote $output"
+  case "${BOOK_PRINT:-}" in
+    pdfx) cmd_print_ready --pdfx "$output" ;;
+    gray) cmd_print_ready --gray "$output" ;;
+  esac
+}
+
+# --- epub -------------------------------------------------------------------
+cmd_epub() {
+  local input="${1:?usage: book epub <input.md> [out.epub]}" output="${2:-${1%.*}.epub}"
+  local meta; meta="$(find_meta "$input")"
+  local proj; proj="$(project_of "$input")"
+  local prose; prose="$(mktemp --suffix=.md)"; ruby "$HERE/bin/strip-fm" "$input" > "$prose"
+  local args=( "$prose" --from=markdown+smart --to=epub3
+    --lua-filter="$HERE/_templates/epub-filters.lua" --css="$HERE/_templates/epub.css"
+    --toc --toc-depth=2 --split-level=1 -o "$output" )
+  [ -n "$meta" ] && args+=( --metadata-file="$meta" )
+  local master="${BOOK_COVER:-}"
+  [ -z "$master" ] && [ -n "$meta" ] && master="$(yaml_get "$meta" cover background image)"
+  if [ -n "$master" ]; then
+    case "$master" in /*) master="$HERE$master" ;; esac
+    if [ -f "$master" ]; then
+      local cov="$(dirname "$output")/$proj - cover.jpg"
+      resize_cover "$master" "$cov"; args+=( --epub-cover-image="$cov" )
+    else echo "  cover not found, skipping: $master" >&2; fi
+  fi
+  echo "Building $output ..."; [ -n "$meta" ] && echo "  metadata: $meta"
+  pandoc "${args[@]}"; rm -f "$prose"; echo "Wrote $output"
+}
+
+# --- cover (print wraparound) ----------------------------------------------
+cmd_cover() {
+  local input="${1:?usage: book cover <input.md> [out.pdf]}"
+  local meta; meta="$(find_meta "$input")"
+  [ -f "$meta" ] || { echo "no _metadata.yml found for $input" >&2; exit 1; }
+  local proj; proj="$(project_of "$input")"
+  local typ="$HERE/Books/_builds/$proj - cover.typ"
+  local out="${2:-$HERE/Books/_builds/$proj - cover-print.pdf}"
+  ruby "$HERE/bin/cover.rb" -o "$typ" "$meta"
+  echo "Building $out ..."
+  typst compile --root "$HERE" "$typ" "$out"
+  echo "Wrote $out"
+}
+
+# --- print-ready (KDP / IngramSpark) ---------------------------------------
+cmd_print_ready() {
+  local mode="pdfx"
+  case "${1:-}" in --pdfx) mode=pdfx; shift;; --gray) mode=gray; shift;; esac
+  local in="${1:?usage: book print-ready [--pdfx|--gray] <in.pdf> [out.pdf]}" out="${2:-${1%.pdf}-print.pdf}"
+  local common=( -dBATCH -dNOPAUSE -dNOSAFER -q -sDEVICE=pdfwrite -dAutoRotatePages=/None
+    -dEmbedAllFonts=true -dSubsetFonts=true -sColorConversionStrategy=Gray -dProcessColorModel=/DeviceGray )
+  if [ "$mode" = gray ]; then
+    echo "Writing grayscale PDF (KDP) -> $out"
+    gs "${common[@]}" -dPDFSETTINGS=/prepress -sOutputFile="$out" "$in"
+  else
+    local icc="${BOOK_ICC:-/usr/share/ghostscript/iccprofiles/default_cmyk.icc}"
+    [ -f "$icc" ] || { echo "ICC not found: $icc" >&2; exit 1; }
+    local def; def="$(mktemp --suffix=.ps)"; trap 'rm -f "$def"' RETURN
+    cat > "$def" <<EOF
+%!
+/ICCProfile ($icc) def
+[ /_objdef {icc_PDFX} /type /stream /OBJ pdfmark
+[ {icc_PDFX} <</N 4>> /PUT pdfmark
+[ {icc_PDFX} ICCProfile (r) file /PUT pdfmark
+[ /_objdef {OutputIntent_PDFX} /type /dict /OBJ pdfmark
+[ {OutputIntent_PDFX} << /Type /OutputIntent /S /GTS_PDFX /OutputCondition (CMYK)
+  /OutputConditionIdentifier (Custom) /RegistryName (http://www.color.org) /DestOutputProfile {icc_PDFX} >> /PUT pdfmark
+[ {Catalog} <</OutputIntents [ {OutputIntent_PDFX} ]>> /PUT pdfmark
+EOF
+    echo "Writing grayscale PDF/X-1a:2001 -> $out (intent: $icc)"
+    gs -dPDFX "${common[@]}" -dCompatibilityLevel=1.3 -dPDFSETTINGS=/prepress -sOutputFile="$out" "$def" "$in"
+  fi
+  echo "Wrote $out"
+}
+
+# --- font (Google Fonts installer) -----------------------------------------
+cmd_font() {
+  local family="${1:?usage: book font \"Family Name\"}"
+  local slug; slug="$(printf '%s' "$family" | tr '[:upper:]' '[:lower:]' | tr -d ' ')"
+  local dest="$HOME/.local/share/fonts/$slug" api="https://api.github.com/repos/google/fonts/contents"
+  local tmp; tmp="$(mktemp)"; trap 'rm -f "$tmp"' RETURN
+  local lic=""
+  for l in ofl apache ufl; do
+    if curl -fsSL "$api/$l/$slug" -o "$tmp" 2>/dev/null && grep -q download_url "$tmp"; then lic="$l"; break; fi
+  done
+  [ -n "$lic" ] || { echo "Could not find '$family' (slug '$slug') in google/fonts." >&2; exit 1; }
+  mkdir -p "$dest"
+  mapfile -t urls < <(grep -oE '"download_url": *"[^"]+\.(ttf|otf)"' "$tmp" | sed -E 's/.*"(https[^"]+)"/\1/')
+  for u in "${urls[@]}"; do echo "  fetching $(basename "$u")"; curl -fsSL "$u" -o "$dest/$(basename "$u")"; done
+  fc-cache -f "$dest" >/dev/null
+  echo "Installed '$family' -> $dest"
+}
+
+# --- all (both reader deliverables: PDF + EPUB; cover is separate) ----------
+cmd_all() { cmd_pdf "$@"; cmd_epub "$1"; }
+
+# --- dispatch ---------------------------------------------------------------
+sub="${1:-}"; shift || true
+case "$sub" in
+  pdf)         cmd_pdf "$@" ;;
+  epub)        cmd_epub "$@" ;;
+  cover)       cmd_cover "$@" ;;
+  print-ready) cmd_print_ready "$@" ;;
+  font)        cmd_font "$@" ;;
+  all)         cmd_all "$@" ;;
+  ""|-h|--help|help)
+    sed -n '2,18p' "${BASH_SOURCE[0]}" | sed 's/^# \{0,1\}//' ;;
+  *) echo "unknown subcommand: $sub (try: book help)" >&2; exit 1 ;;
+esac

@@ -1,0 +1,35 @@
+#!/usr/bin/env ruby
+# strip-fm — remove YAML metadata blocks from a Markdown stream, preserving
+# lone `---` horizontal rules.
+#
+# Longform can compile each scene's front matter into the manuscript; with
+# metadata now coming solely from _metadata.yml (via pandoc --metadata-file),
+# those blocks are noise that pollute document metadata. A block is removed only
+# when it is fenced by `---` ... `---`/`...` AND every inner line is YAML-ish
+# (a `key:`, a `- item`, an indented continuation, a comment, or blank) with at
+# least one real `key:` — so prose and scene-break rules are never touched.
+lines = (ARGV[0] ? File.read(ARGV[0]) : STDIN.read).lines
+fence   = ->(s) { t = s.rstrip; t == '---' || t == '...' }
+yamlish = ->(s) { t = s.rstrip
+  t.empty? || t =~ /\A\s*#/ || t =~ %r{\A\s*[\w][\w ./-]*:(\s|\z)} ||
+  t =~ /\A\s*-\s/ || t =~ /\A\s+\S/ }
+haskey  = ->(s) { s =~ %r{\A\s*[\w][\w ./-]*:(\s|\z)} }
+
+out = []
+i = 0
+while i < lines.length
+  if lines[i].rstrip == '---'
+    j = i + 1
+    j += 1 while j < lines.length && !fence.call(lines[j]) && (j - i) < 60
+    if j < lines.length && fence.call(lines[j]) && j > i + 1
+      block = lines[(i + 1)...j]
+      if block.any? { |l| haskey.call(l) } && block.all? { |l| yamlish.call(l) }
+        i = j + 1
+        next
+      end
+    end
+  end
+  out << lines[i]
+  i += 1
+end
+print out.join
