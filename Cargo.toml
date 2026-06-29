@@ -3,7 +3,7 @@ name = "argraver"
 version = "0.1.0"
 edition = "2021"
 description = "Single-source book compiler: one Markdown manuscript + _metadata.yml -> EPUB and print PDF"
-license = "MIT"
+license-file = "LICENSE"
 repository = ""
 default-run = "argraver"
 
