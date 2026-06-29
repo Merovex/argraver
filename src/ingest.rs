@@ -13,6 +13,39 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
+/// A starter `_metadata.yml`, written by `argraver init`. Documents every
+/// supported `book:` / `cover:` setting with sensible defaults.
+pub const METADATA_TEMPLATE: &str = r#"# _metadata.yml — single source of truth for this book.
+# Standalone YAML (not Obsidian front matter); edit in your editor of choice.
+#   book:  the book's facts — consumed by the EPUB and the print PDF.
+#   cover: cover art (the EPUB embeds a resized copy).
+
+book:
+  title: Untitled
+  subtitle:
+  author: Anonymous
+  publisher:
+  # copyright:   (optional — omit for "Copyright © <author>")
+  edition: First Edition
+  isbn:
+  trim: digest          # pocket 5x8 | small-digest 5.25x8 | digest 5.5x8.5 | trade 6x9 | large 7x10
+  margins: normal       # narrow | normal | wide — picks within the trim's margin ranges
+  chapter_start: recto  # recto (next right-hand page) | any (next page, either side)
+  scenebreak: auto      # auto (blank mid-page, * * * at a page edge) | ornament | blank
+  # body_font: Libertinus Serif   # PDF body font (installed font or a family under font_path)
+  # display_font:                 # chapter/heading font (defaults to body_font)
+  # font_path: fonts              # dir of .ttf/.otf to embed (relative to this file)
+  dedication:
+  description: |
+    A one-or-two paragraph book description (back-cover / catalog copy).
+  # rights:      (optional — omit for the generic all-rights-reserved text)
+  # disclaimer:  (optional — omit for the generic fiction disclaimer)
+
+cover:
+  background:
+    image: cover.png    # path relative to this file (or vault-absolute)
+"#;
+
 /// The `book:` map from `_metadata.yml` — the single source of truth for the
 /// book's facts. Field names match the YAML keys; everything optional but
 /// `title` is treated as required at render time.
@@ -31,11 +64,112 @@ pub struct Book {
     pub trim: Option<String>,
     pub dedication: Option<String>,
     pub description: Option<String>,
+    /// Scene-break style: `auto` (default) | `ornament` | `blank`. See
+    /// [`Book::scene_break_style`].
+    pub scenebreak: Option<String>,
+    /// Outside-margin width: `narrow` | `normal` (default) | `wide`. See
+    /// [`Book::margin_width`]. The inside (gutter) margin is derived from the
+    /// page count, not this setting.
+    pub margins: Option<String>,
+    /// Where a chapter opens: `recto` (default — the next right-hand page, may
+    /// leave a blank verso) | `any` (the next page, either side). See
+    /// [`Book::chapter_opens_recto`].
+    pub chapter_start: Option<String>,
+    /// Body (running text) font family name. Must be a system font or live under
+    /// `font_path`. Env `BOOK_MAINFONT` overrides. Default: Libertinus Serif.
+    pub body_font: Option<String>,
+    /// Display (chapter/heading) font family. Env `BOOK_DISPLAYFONT` overrides.
+    /// Defaults to the body font.
+    pub display_font: Option<String>,
+    /// Directory of custom font files (`.ttf`/`.otf`) to make available to the
+    /// PDF typesetter (so they embed). Relative paths resolve against the
+    /// metadata file's directory. Env `BOOK_FONTPATH` overrides.
+    pub font_path: Option<String>,
     /// Optional override for the generic "all rights reserved" text.
     pub rights: Option<String>,
     /// Optional override for the generic fiction disclaimer.
     pub disclaimer: Option<String>,
     pub lang: Option<String>,
+}
+
+/// How a scene break (a `---` rule inside a chapter) is rendered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SceneBreakStyle {
+    /// PDF: a blank gap mid-page, the ornament against a page edge. EPUB: the
+    /// styled `<hr>` rule. The default.
+    Auto,
+    /// Always the centered asterisk ornament (`* * *`), both outputs.
+    Ornament,
+    /// Always a plain blank gap (no rule, no ornament), both outputs.
+    Blank,
+}
+
+impl Book {
+    /// The configured scene-break style, defaulting to `Auto`. Unknown values
+    /// warn and fall back to `Auto`.
+    pub fn scene_break_style(&self) -> SceneBreakStyle {
+        match self.scenebreak.as_deref().map(str::trim) {
+            Some("ornament") => SceneBreakStyle::Ornament,
+            Some("blank") => SceneBreakStyle::Blank,
+            None | Some("") | Some("auto") => SceneBreakStyle::Auto,
+            Some(other) => {
+                eprintln!("  unknown book.scenebreak '{other}' (auto|ornament|blank); using auto");
+                SceneBreakStyle::Auto
+            }
+        }
+    }
+
+    /// The configured margin width, defaulting to `normal`. This selects where
+    /// inside the trim's recommended margin ranges the page sits (see the trim
+    /// table in `render_typst`); it is not an absolute size.
+    pub fn margin_width(&self) -> MarginWidth {
+        match self.margins.as_deref().map(str::trim) {
+            Some("narrow") => MarginWidth::Narrow,
+            Some("wide") => MarginWidth::Wide,
+            None | Some("") | Some("normal") => MarginWidth::Normal,
+            Some(other) => {
+                eprintln!("  unknown book.margins '{other}' (narrow|normal|wide); using normal");
+                MarginWidth::Normal
+            }
+        }
+    }
+}
+
+impl Book {
+    /// Whether chapters open on the next right-hand (recto/odd) page. `recto`
+    /// (default) gives the traditional book look — chapters always start on the
+    /// right, leaving a blank verso when needed. `any` opens on the next page,
+    /// either side (no blank versos). Unknown values warn and default to recto.
+    pub fn chapter_opens_recto(&self) -> bool {
+        match self.chapter_start.as_deref().map(str::trim) {
+            Some("any") | Some("next") => false,
+            None | Some("") | Some("recto") | Some("right") => true,
+            Some(other) => {
+                eprintln!("  unknown book.chapter_start '{other}' (recto|any); using recto");
+                true
+            }
+        }
+    }
+}
+
+/// How tight the page sits within a trim's recommended margin ranges: `Narrow`
+/// is the low end, `Wide` the high end, `Normal` the midpoint.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MarginWidth {
+    Narrow,
+    Normal,
+    Wide,
+}
+
+impl MarginWidth {
+    /// Pick a value within a `(low, high)` inch range for this width.
+    pub fn within(self, (low, high): (f64, f64)) -> f64 {
+        match self {
+            MarginWidth::Narrow => low,
+            MarginWidth::Normal => (low + high) / 2.0,
+            MarginWidth::Wide => high,
+        }
+    }
 }
 
 /// The `cover:` map. Only the fields the EPUB cover needs are modeled; the rest
@@ -250,6 +384,15 @@ mod tests {
         );
         assert_eq!(project_of("draft.md"), "draft");
         assert_eq!(project_of("plain"), "plain");
+    }
+
+    #[test]
+    fn init_template_is_valid_metadata() {
+        // The `argraver init` template must always parse and round-trip cleanly.
+        let meta: Metadata = serde_yaml::from_str(METADATA_TEMPLATE).expect("template parses");
+        assert_eq!(meta.book.title, "Untitled");
+        assert_eq!(meta.book.trim.as_deref(), Some("digest"));
+        assert!(meta.book.chapter_opens_recto());
     }
 
     #[test]

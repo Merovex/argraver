@@ -41,18 +41,20 @@ both outputs by construction.
 | --- | --- |
 | `main.rs` | thin entry — delegates to `cli` |
 | `lib.rs` | crate root; re-exports the modules below |
-| `cli` | `clap` subcommands: `epub \| pdf \| all <manuscript.md> [out]` + metadata-discovery UX |
+| `cli` | `clap` subcommands: `init [dir]`, `epub \| pdf \| all \| typst <manuscript.md> [out]` + metadata-discovery UX. `pdf` removes its intermediate `.typ` on success; `typst` emits and keeps it |
 | `ingest` | `_metadata.yml` → `Book`; manuscript load; `strip-fm` port; `project_of`/`find_meta`; H1 chapter split |
 | `parse` | comrak `Options` (smart + GFM extensions) and the single `parse_document` |
 | `render_html` | AST → per-chapter XHTML; leading-separator strip, `chapter-title` class, drop caps; front-matter pages |
 | `epub` | `epub-builder` assembly: metadata, cover resize, css, front matter, chapters, ToC |
-| `render_typst` | `typst_escape` (book variant) + `NodeValue → Typst` visitor — **stub** |
-| `pdf` | typst CLI subprocess (option C′) — **stub** |
+| `render_typst` | `typst_escape` (book variant), the `NodeValue → Typst` visitor, and the ported interior template + front matter |
+| `pdf` | assemble the document and typeset via the `typst` CLI (option C′) |
 
-**Status:** the **EPUB path is real**; the **PDF/typst path is honestly stubbed**
-(`render_typst` / `pdf` return a not-implemented error). `pdf` and `all` error
-until the PDF phase lands. This is by design — see the build order in
-`docs/DESIGN.md`.
+**Status:** both the **EPUB and PDF paths are implemented.** The PDF path shells
+out to `typst` (must be on `PATH`) — it writes a `.typ` next to the output and
+runs `typst compile`. The interior design (page setup, drop caps via the vendored
+`droplet.typ`, scene breaks, recto chapter starts, running heads, page numbering
+restarting at the first chapter) is ported from Verkilo and adapted to typst
+0.14. Out of scope still: DOCX, `print-ready`, the print wraparound cover.
 
 ## Commands
 
@@ -64,11 +66,14 @@ cargo test ingest::         # run one module's tests (path filter)
 cargo test strip_fm         # run a single test by name substring
 
 # Run the CLI (note the `--` separating cargo args from program args):
+cargo run -- init                                # write a starter _metadata.yml here
+cargo run -- init path/to/book                   # ...or into a directory (-f to overwrite)
 cargo run -- epub "manuscript.md"                # EPUB next to the input
 cargo run -- epub "manuscript.md" builds/out.epub
 cargo run -- epub "manuscript.md" -m path/_metadata.yml   # explicit metadata
-cargo run -- pdf  "manuscript.md"                # stubbed: errors for now
-cargo run -- all  "manuscript.md"                # stubbed via pdf
+cargo run -- pdf  "manuscript.md"                # needs `typst` on PATH; .typ cleaned up after
+cargo run -- all  "manuscript.md" builds/book    # -> builds/book.epub + .pdf
+cargo run -- typst "manuscript.md"               # emit the generated .typ (no PDF), and keep it
 
 cargo run -- --help
 ```
@@ -83,8 +88,14 @@ Build outputs go to `builds/` (gitignored). `target/` is gitignored.
   those blocks while preserving lone `---` scene-break rules. H1 (`# …`) splits
   chapters; a thematic break (`---`) inside content is a scene break.
 - **Metadata:** a standalone `_metadata.yml` with a `book:` map (title, subtitle,
-  author, publisher, copyright, edition, isbn, trim, dedication, description) and a
-  `cover:` map. Resolution precedence: the `--meta/-m <FILE>` flag wins; else the
+  author, publisher, copyright, edition, isbn, trim, `scenebreak`
+  (`auto|ornament|blank`), `margins` (`narrow|normal|wide` — picks within the
+  trim's margin ranges; inside/gutter auto-scales with page count for
+  KDP/IngramSpark), `chapter_start` (`recto|any`), `body_font`/`display_font`/
+  `font_path` (PDF fonts — typst embeds + subsets them; `font_path` adds
+  non-system fonts), dedication, description) and a `cover:` map (the EPUB embeds a
+  resized `cover.jpg` and opens on a full-page cover). Resolution precedence: the
+  `--meta/-m <FILE>` flag wins; else the
   `BOOK_META` env var; else discovery — `Books/<Name>/<Project>/_metadata.yml`,
   then beside the manuscript. `book:` is the single source of truth — facts live
   there once. An explicit `--meta` path that doesn't exist is a hard error (it

@@ -14,7 +14,7 @@
 use comrak::nodes::{AstNode, NodeValue};
 use comrak::{format_html, parse_document, Arena, Options};
 
-use crate::ingest::Book;
+use crate::ingest::{Book, SceneBreakStyle};
 
 /// A rendered body chapter: its plain-text title (for the ToC) and full XHTML.
 #[derive(Debug, Clone)]
@@ -39,7 +39,8 @@ const DEFAULT_DISCLAIMER: &str = "This is a work of fiction. Names, characters, 
 
 /// Parse the (already strip-fm'd) manuscript once and render it to body
 /// chapters. The single parse here is the shared front end for the EPUB path.
-pub fn render_chapters(markdown: &str) -> Vec<Chapter> {
+/// `scene_break` controls how in-chapter `---` rules are rendered.
+pub fn render_chapters(markdown: &str, scene_break: SceneBreakStyle) -> Vec<Chapter> {
     // EPUB render needs raw HTML passthrough: our injected drop-cap span is an
     // inline HTML node, and authored HTML should survive like it does in pandoc.
     let mut opts: Options = crate::parse::options();
@@ -57,6 +58,7 @@ pub fn render_chapters(markdown: &str) -> Vec<Chapter> {
             apply_drop_cap(&arena, chap);
             let body = format_node(chap, &opts);
             let body = add_chapter_title_class(&body);
+            let body = apply_scene_break_style(&body, scene_break);
             let xhtml = xhtml_doc(&title, &body);
             Chapter { title, xhtml }
         })
@@ -76,13 +78,21 @@ fn split_into_chapters<'a>(
 
     // Collect first: we mutate the tree (detach) as we go.
     let kids: Vec<&'a AstNode<'a>> = root.children().collect();
-    for node in kids {
+    for (i, node) in kids.iter().enumerate() {
+        let node: &'a AstNode<'a> = node;
         let value = node.data.borrow().value.clone();
 
-        // Leading separators before any content are dropped.
-        if matches!(value, NodeValue::ThematicBreak) && !content_started {
-            node.detach();
-            continue;
+        // Drop a scene-break rule that leads the content or sits directly before
+        // a heading (a Longform scene-separator ahead of the next chapter): no
+        // stray rule stranded at the foot of a chapter.
+        if matches!(value, NodeValue::ThematicBreak) {
+            let before_heading = kids
+                .get(i + 1)
+                .is_some_and(|n| matches!(&n.data.borrow().value, NodeValue::Heading(_)));
+            if !content_started || before_heading {
+                node.detach();
+                continue;
+            }
         }
 
         let is_chapter_head = matches!(&value, NodeValue::Heading(h) if h.level == 1);
@@ -202,6 +212,14 @@ fn copyright_page(book: &Book) -> String {
     xhtml_doc("Copyright", &body)
 }
 
+/// The full-page cover XHTML, shown as the first page when a cover is embedded.
+/// References the embedded `cover.jpg`; styled by `epub.css` (`body#cover` /
+/// `#cover-image`).
+pub fn cover_page() -> String {
+    let body = "<div id=\"cover-image\"><img src=\"cover.jpg\" alt=\"Cover\"/></div>\n";
+    xhtml_body("Cover", "cover", body)
+}
+
 fn dedication_page(dedication: &str) -> String {
     let body = format!(
         "<section epub:type=\"dedication\" class=\"dedication\">\n<p>{}</p>\n</section>\n",
@@ -264,8 +282,30 @@ fn add_chapter_title_class(html: &str) -> String {
     html.replacen("<h1>", "<h1 class=\"chapter-title\">", 1)
 }
 
+/// Apply the configured scene-break style to comrak's `<hr />` (its rendering of
+/// a thematic break). `Auto` keeps the styled rule; the others swap it for the
+/// ornament or a plain gap (styled by `epub.css`).
+fn apply_scene_break_style(html: &str, style: SceneBreakStyle) -> String {
+    let replacement = match style {
+        SceneBreakStyle::Auto => return html.to_string(),
+        SceneBreakStyle::Ornament => "<p class=\"scene-break\">* * *</p>",
+        SceneBreakStyle::Blank => "<p class=\"scene-break scene-blank\"></p>",
+    };
+    html.replace("<hr />", replacement)
+}
+
 /// Wrap an HTML body fragment in a minimal XHTML document linking the stylesheet.
 fn xhtml_doc(title: &str, body: &str) -> String {
+    xhtml_body(title, "", body)
+}
+
+/// As [`xhtml_doc`], but with an `id` on the `<body>` (e.g. `cover`).
+fn xhtml_body(title: &str, body_id: &str, body: &str) -> String {
+    let id_attr = if body_id.is_empty() {
+        String::new()
+    } else {
+        format!(" id=\"{body_id}\"")
+    };
     format!(
         "<?xml version=\"1.0\" encoding=\"utf-8\"?>\n\
          <!DOCTYPE html>\n\
@@ -275,9 +315,9 @@ fn xhtml_doc(title: &str, body: &str) -> String {
          <title>{}</title>\n\
          <link rel=\"stylesheet\" type=\"text/css\" href=\"stylesheet.css\"/>\n\
          </head>\n\
-         <body>\n{}</body>\n\
+         <body{}>\n{}</body>\n\
          </html>\n",
-        esc(title), body
+        esc(title), id_attr, body
     )
 }
 
@@ -301,7 +341,7 @@ mod tests {
     #[test]
     fn splits_at_h1_and_drops_leading_rule() {
         let md = "---\n\n# One\n\nAlpha body.\n\n# Two\n\nBeta body.\n";
-        let chapters = render_chapters(md);
+        let chapters = render_chapters(md, SceneBreakStyle::Auto);
         assert_eq!(chapters.len(), 2);
         assert_eq!(chapters[0].title, "One");
         assert_eq!(chapters[1].title, "Two");
@@ -314,7 +354,7 @@ mod tests {
     #[test]
     fn drop_cap_wraps_first_letter() {
         let md = "# Ch\n\nJake watched.\n";
-        let chapters = render_chapters(md);
+        let chapters = render_chapters(md, SceneBreakStyle::Auto);
         assert!(chapters[0]
             .xhtml
             .contains("<span class=\"dropcap\">J</span>ake watched."));
@@ -323,15 +363,46 @@ mod tests {
     #[test]
     fn scene_break_rule_is_kept() {
         let md = "# Ch\n\nOne.\n\n---\n\nTwo.\n";
-        let chapters = render_chapters(md);
+        let chapters = render_chapters(md, SceneBreakStyle::Auto);
         assert!(chapters[0].xhtml.contains("<hr"));
+    }
+
+    #[test]
+    fn scene_break_before_heading_is_dropped() {
+        // Longform's scene-separator ahead of the next chapter must not leave a
+        // trailing rule at the foot of the previous chapter.
+        let md = "# One\n\nBody.\n\n---\n\n# Two\n\nBody.\n";
+        let chapters = render_chapters(md, SceneBreakStyle::Auto);
+        assert_eq!(chapters.len(), 2);
+        assert!(!chapters[0].xhtml.contains("<hr"));
+    }
+
+    #[test]
+    fn scene_break_style_controls_the_rule() {
+        let md = "# Ch\n\nOne.\n\n---\n\nTwo.\n";
+        let auto = &render_chapters(md, SceneBreakStyle::Auto)[0].xhtml;
+        assert!(auto.contains("<hr") && !auto.contains("scene-break"));
+
+        let ornament = &render_chapters(md, SceneBreakStyle::Ornament)[0].xhtml;
+        assert!(ornament.contains("<p class=\"scene-break\">* * *</p>") && !ornament.contains("<hr"));
+
+        let blank = &render_chapters(md, SceneBreakStyle::Blank)[0].xhtml;
+        assert!(blank.contains("scene-blank") && !blank.contains("<hr"));
     }
 
     #[test]
     fn footnotes_render_as_a_section() {
         let md = "# Ch\n\nText with a note.[^1]\n\n[^1]: The note body.\n";
-        let chapters = render_chapters(md);
+        let chapters = render_chapters(md, SceneBreakStyle::Auto);
         assert!(chapters[0].xhtml.contains("class=\"footnotes\""));
+    }
+
+    #[test]
+    fn cover_page_references_the_embedded_image() {
+        let html = cover_page();
+        assert!(html.contains("<body id=\"cover\">"));
+        assert!(html.contains("src=\"cover.jpg\""));
+        assert!(html.contains("stylesheet.css"));
     }
 
     #[test]

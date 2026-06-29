@@ -48,6 +48,16 @@ hr {
   margin: 1.5em 0;
 }
 
+/* Scene break — book.scenebreak: ornament (centered marks) or blank (a gap).
+   The following paragraph is not indented (see the `.scene-break + p` rule). */
+.scene-break {
+  text-align: center;
+  text-indent: 0;
+  margin: 1.5em 0;
+  letter-spacing: 0.4em;
+}
+.scene-blank { letter-spacing: 0; }
+
 /* Front matter — title page. Pandoc emits the section with class "titlepage".
    Title + subtitle sit near the top; author and imprint are pushed to the foot
    of the page; the copyright is hidden here (it lives on its own page). */
@@ -104,3 +114,4 @@ img { max-width: 100%; height: auto; }
 body#cover { margin: 0; padding: 0; text-align: center; }
 #cover-image { height: 100vh; margin: 0; padding: 0; }
 #cover-image svg { width: 100%; height: 100%; }
+#cover-image img { height: 100%; width: auto; max-width: 100%; object-fit: contain; }

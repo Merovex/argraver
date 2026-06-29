@@ -26,7 +26,7 @@ pub fn build(
     meta_dir: Option<&Path>,
     output: &Path,
 ) -> Result<()> {
-    let chapters = render_html::render_chapters(markdown);
+    let chapters = render_html::render_chapters(markdown, book.scene_break_style());
     let front = render_html::front_matter(book);
 
     let mut builder = EpubBuilder::new(ZipLibrary::new().context("init epub zip library")?)
@@ -51,15 +51,27 @@ pub fn build(
 
     // Cover (resize to a fitted JPEG). Missing covers are a warning, not an
     // error — matching the bash `book`.
+    let mut cover_embedded = false;
     if let Some(raw) = cover.background.image.as_deref() {
         match resolve_cover_path(raw, meta_dir) {
             Some(path) => {
                 let jpeg = resize_cover(&path)
                     .with_context(|| format!("resizing cover {}", path.display()))?;
                 builder.add_cover_image("cover.jpg", &jpeg[..], "image/jpeg")?;
+                cover_embedded = true;
             }
             None => eprintln!("  cover not found, skipping: {raw}"),
         }
+    }
+
+    // A full-page cover as the first spine item, so the book *opens* on the cover
+    // (not just a library thumbnail). `add_cover_image` only registers the image.
+    if cover_embedded {
+        let cover_page = render_html::cover_page();
+        builder.add_content(
+            EpubContent::new("cover.xhtml", cover_page.as_bytes())
+                .reftype(ReferenceType::Cover),
+        )?;
     }
 
     add_front_matter(&mut builder, &front)?;

@@ -6,7 +6,7 @@
 
 use std::path::{Path, PathBuf};
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
 
 use crate::{epub, ingest, pdf};
@@ -24,12 +24,25 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
+    /// Write a starter `_metadata.yml` into a directory.
+    Init(InitArgs),
     /// Build an EPUB.
     Epub(BuildArgs),
-    /// Build a print PDF (not implemented yet).
+    /// Build a print PDF.
     Pdf(BuildArgs),
     /// Build both EPUB and PDF.
     All(BuildArgs),
+    /// Emit the generated Typst markup (`.typ`) without compiling a PDF.
+    Typst(BuildArgs),
+}
+
+#[derive(clap::Args)]
+struct InitArgs {
+    /// Directory to write `_metadata.yml` into (default: current directory).
+    dir: Option<PathBuf>,
+    /// Overwrite an existing `_metadata.yml`.
+    #[arg(short, long)]
+    force: bool,
 }
 
 #[derive(clap::Args)]
@@ -47,19 +60,62 @@ struct BuildArgs {
 pub fn run() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
-        Command::Epub(args) => build(&args, Target::Epub),
-        Command::Pdf(args) => build(&args, Target::Pdf),
+        Command::Init(args) => init(&args),
+        Command::Epub(args) => {
+            let out = output_for(&args, Target::Epub);
+            build(&args, Target::Epub, &out)
+        }
+        Command::Pdf(args) => {
+            let out = output_for(&args, Target::Pdf);
+            build(&args, Target::Pdf, &out)
+        }
+        Command::Typst(args) => {
+            let out = output_for(&args, Target::Typst);
+            build(&args, Target::Typst, &out)
+        }
+        // `all`: treat any explicit output as a stem and give each format its own
+        // extension (so `out` -> out.epub + out.pdf).
         Command::All(args) => {
-            build(&args, Target::Epub)?;
-            build(&args, Target::Pdf)
+            let base = args.output.clone().unwrap_or_else(|| args.manuscript.clone());
+            build(&args, Target::Epub, &base.with_extension("epub"))?;
+            build(&args, Target::Pdf, &base.with_extension("pdf"))
         }
     }
+}
+
+/// Write a starter `_metadata.yml` into the target directory.
+fn init(args: &InitArgs) -> Result<()> {
+    let dir = args.dir.clone().unwrap_or_else(|| PathBuf::from("."));
+    let path = dir.join("_metadata.yml");
+    if path.exists() && !args.force {
+        anyhow::bail!(
+            "{} already exists (use --force to overwrite)",
+            path.display()
+        );
+    }
+    if let Some(parent) = path.parent().filter(|p| !p.as_os_str().is_empty()) {
+        std::fs::create_dir_all(parent)
+            .with_context(|| format!("creating {}", parent.display()))?;
+    }
+    std::fs::write(&path, ingest::METADATA_TEMPLATE)
+        .with_context(|| format!("writing {}", path.display()))?;
+    println!("Wrote {}", path.display());
+    Ok(())
+}
+
+/// The output path for a single-format build: the explicit one, else the
+/// manuscript path with the format's extension.
+fn output_for(args: &BuildArgs, target: Target) -> PathBuf {
+    args.output
+        .clone()
+        .unwrap_or_else(|| args.manuscript.with_extension(target.ext()))
 }
 
 #[derive(Clone, Copy)]
 enum Target {
     Epub,
     Pdf,
+    Typst,
 }
 
 impl Target {
@@ -67,16 +123,13 @@ impl Target {
         match self {
             Target::Epub => "epub",
             Target::Pdf => "pdf",
+            Target::Typst => "typ",
         }
     }
 }
 
-fn build(args: &BuildArgs, target: Target) -> Result<()> {
+fn build(args: &BuildArgs, target: Target, output: &Path) -> Result<()> {
     let manuscript = &args.manuscript;
-    let output = args
-        .output
-        .clone()
-        .unwrap_or_else(|| manuscript.with_extension(target.ext()));
 
     // Explicit `--meta` wins; otherwise discover (BOOK_META > Books/*/<Project> >
     // beside the manuscript).
@@ -109,15 +162,18 @@ fn build(args: &BuildArgs, target: Target) -> Result<()> {
             &metadata.cover,
             &markdown,
             meta_dir.as_deref(),
-            &output,
+            output,
         )?,
         Target::Pdf => pdf::build(
             &metadata.book,
             &metadata.cover,
             &markdown,
             meta_dir.as_deref(),
-            &output,
+            output,
         )?,
+        Target::Typst => {
+            pdf::write_typst(&metadata.book, &markdown, meta_dir.as_deref(), output)?
+        }
     }
 
     println!("Wrote {}", output.display());

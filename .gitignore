@@ -5,5 +5,12 @@
 /builds/*
 !/builds/.gitkeep
 
+# Generated Typst markup + book outputs landing beside a manuscript
+*.typ
+*.epub
+*.pdf
+# ...but the vendored drop-cap library is source, not generated.
+!src/resources/*.typ
+
 # OS / editor cruft
 .DS_Store

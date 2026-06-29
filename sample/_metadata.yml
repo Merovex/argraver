@@ -13,6 +13,13 @@ book:
   edition: First Edition
   isbn: 978-0-00-000000-0
   trim: digest          # pocket 5x8 | small-digest 5.25x8 | digest 5.5x8.5 | trade 6x9 | large 7x10
+  scenebreak: ornament      # auto (blank mid-page, * * * at a page edge) | ornament (always * * *) | blank
+  margins: normal           # narrow | normal | wide — picks within the trim's margin ranges (inside/gutter auto-scales with page count)
+  chapter_start: recto      # recto (next right-hand page, traditional; may leave a blank verso) | any (next page, either side)
+  #body_font: Source Serif 4  # PDF body font — any installed font or a family under font_path (embedded + subset)
+  body_font: Comic Relief  # PDF body font — any installed font or a family under font_path (embedded + subset)
+  # display_font:            # chapter/heading font (defaults to body_font)
+  # font_path: fonts         # dir of .ttf/.otf to embed (relative to this file); env BOOK_FONTPATH overrides
   dedication: For those who came before.
   description: |
     A short prequel to the Star Couriers saga — the run that ended a career and
