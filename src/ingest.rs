@@ -1,7 +1,7 @@
 //! Ingest: turn the on-disk inputs into typed values the renderers consume.
 //!
 //! Three jobs, all shared by both back ends:
-//!   1. Metadata discovery + parse (`_metadata.yml` -> [`Book`]).
+//!   1. Metadata discovery + parse (`_argraver.yml` -> [`Book`]).
 //!   2. `strip-fm`: drop Longform's inline YAML blocks, keep `---` scene rules.
 //!   3. Project-name derivation, mirroring the bash `book` UX.
 //!
@@ -13,9 +13,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{Context, Result};
 use serde::Deserialize;
 
-/// A starter `_metadata.yml`, written by `argraver init`. Documents every
+/// A starter `_argraver.yml`, written by `argraver init`. Documents every
 /// supported `book:` / `cover:` setting with sensible defaults.
-pub const METADATA_TEMPLATE: &str = r#"# _metadata.yml — single source of truth for this book.
+pub const METADATA_TEMPLATE: &str = r#"# _argraver.yml — single source of truth for this book.
 # Standalone YAML (not Obsidian front matter); edit in your editor of choice.
 #   book:  the book's facts — consumed by the EPUB and the print PDF.
 #   cover: cover art (the EPUB embeds a resized copy).
@@ -46,7 +46,7 @@ cover:
     image: cover.png    # path relative to this file (or vault-absolute)
 "#;
 
-/// The `book:` map from `_metadata.yml` — the single source of truth for the
+/// The `book:` map from `_argraver.yml` — the single source of truth for the
 /// book's facts. Field names match the YAML keys; everything optional but
 /// `title` is treated as required at render time.
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -186,7 +186,7 @@ pub struct CoverBackground {
     pub image: Option<String>,
 }
 
-/// The whole `_metadata.yml`.
+/// The whole `_argraver.yml`.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Metadata {
     #[serde(default)]
@@ -217,10 +217,10 @@ pub fn project_of(manuscript: impl AsRef<Path>) -> String {
     base.strip_suffix(".md").map(str::to_owned).unwrap_or(base)
 }
 
-/// Locate the `_metadata.yml` for a manuscript, mirroring the bash `find_meta`:
+/// Locate the `_argraver.yml` for a manuscript, mirroring the bash `find_meta`:
 ///   1. `BOOK_META` env override, if set.
-///   2. `Books/*/<Project>/_metadata.yml` under a discovered vault root.
-///   3. `_metadata.yml` beside the manuscript.
+///   2. `Books/*/<Project>/_argraver.yml` under a discovered vault root.
+///   3. `_argraver.yml` beside the manuscript.
 ///
 /// Returns `None` if nothing is found (the renderers then fall back to defaults).
 pub fn find_meta(manuscript: impl AsRef<Path>) -> Option<PathBuf> {
@@ -234,7 +234,7 @@ pub fn find_meta(manuscript: impl AsRef<Path>) -> Option<PathBuf> {
     let manuscript = manuscript.as_ref();
     let project = project_of(manuscript);
 
-    // `Books/*/<Project>/_metadata.yml` — walk up from the manuscript looking
+    // `Books/*/<Project>/_argraver.yml` — walk up from the manuscript looking
     // for a `Books` dir, then probe each series subfolder for this project.
     let mut dir = manuscript.parent();
     while let Some(d) = dir {
@@ -242,7 +242,7 @@ pub fn find_meta(manuscript: impl AsRef<Path>) -> Option<PathBuf> {
         if books.is_dir() {
             if let Ok(series) = std::fs::read_dir(&books) {
                 for entry in series.flatten() {
-                    let cand = entry.path().join(&project).join("_metadata.yml");
+                    let cand = entry.path().join(&project).join("_argraver.yml");
                     if cand.is_file() {
                         return Some(cand);
                     }
@@ -256,11 +256,11 @@ pub fn find_meta(manuscript: impl AsRef<Path>) -> Option<PathBuf> {
     let beside = manuscript
         .parent()
         .unwrap_or_else(|| Path::new("."))
-        .join("_metadata.yml");
+        .join("_argraver.yml");
     beside.is_file().then_some(beside)
 }
 
-/// Load and parse a `_metadata.yml`.
+/// Load and parse a `_argraver.yml`.
 pub fn load_metadata(path: impl AsRef<Path>) -> Result<Metadata> {
     let path = path.as_ref();
     let raw = std::fs::read_to_string(path)

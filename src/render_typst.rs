@@ -111,14 +111,38 @@ pub fn render_body(markdown: &str) -> String {
     let mut out = String::new();
     let mut content_started = false;
     let mut pending_drop_cap = false;
+    // Set when an H4 has consumed the paragraph that follows it (see below).
+    let mut skip_next = false;
 
     let kids: Vec<&AstNode> = root.children().collect();
     for (i, node) in kids.iter().enumerate() {
+        if skip_next {
+            skip_next = false;
+            continue;
+        }
         let node: &AstNode = node;
         let value = node.data.borrow().value.clone();
         match value {
             // Footnote definitions are inlined at their references, not emitted here.
             NodeValue::FootnoteDefinition(_) => {}
+
+            // H4 is a run-in (paragraph) heading: the bold lead-in opens the
+            // following paragraph inline, so the subsection costs no line of its
+            // own. When no paragraph follows, the head stands alone (empty body).
+            NodeValue::Heading(h) if h.level == 4 => {
+                content_started = true;
+                pending_drop_cap = false;
+                out.push_str("#runin-head[");
+                emit_inline(node, &footnotes, &mut out);
+                out.push_str("][");
+                if let Some(next) = kids.get(i + 1) {
+                    if matches!(&next.data.borrow().value, NodeValue::Paragraph) {
+                        emit_inline(next, &footnotes, &mut out);
+                        skip_next = true;
+                    }
+                }
+                out.push_str("]\n\n");
+            }
 
             NodeValue::ThematicBreak => {
                 // Drop the scene break if it leads the content, or if it sits
@@ -474,6 +498,15 @@ fn preamble(book: &Book, trim: Trim, margins: PageMargins) -> String {
   align(left)[#text(font: "{display}", size: 12pt, style: "italic", hyphenate: false)[#it.body]]
   v(6pt)
 }}
+
+// Run-in (paragraph) heading — H4. Not a `heading` element: the bold lead-in
+// opens the paragraph inline (keeping the normal first-line indent, like LaTeX
+// `\paragraph`), so it stays out of the outline and costs no line of its own.
+// `body` is empty when no paragraph followed the head.
+#let runin-head(head, body) = {{
+  v(0.6em, weak: true)
+  [#text(weight: "bold")[#head.]#h(0.5em)#body]
+}}
 "#,
         title = title,
         author = author,
@@ -727,6 +760,25 @@ mod tests {
         assert_eq!(book.scene_break_style(), SceneBreakStyle::Ornament);
         book.scenebreak = Some("blank".into());
         assert_eq!(book.scene_break_style(), SceneBreakStyle::Blank);
+    }
+
+    #[test]
+    fn h4_runs_into_following_paragraph() {
+        let md = "# Ch\n\n#### Background\n\nThe subsection body.\n";
+        let body = render_body(md);
+        assert!(body.contains("#runin-head[Background][The subsection body.]"));
+        // Not emitted as a standalone level-4 heading.
+        assert!(!body.contains("==== "));
+    }
+
+    #[test]
+    fn h4_without_following_paragraph_is_standalone() {
+        // A list (not a paragraph) follows: the head stands alone, empty body.
+        let md = "# Ch\n\n#### Background\n\n- item\n";
+        let body = render_body(md);
+        assert!(body.contains("#runin-head[Background][]"));
+        // The list still renders after it.
+        assert!(body.contains("- item"));
     }
 
     #[test]

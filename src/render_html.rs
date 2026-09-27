@@ -56,6 +56,7 @@ pub fn render_chapters(markdown: &str, scene_break: SceneBreakStyle) -> Vec<Chap
         .map(|chap| {
             let title = chapter_heading_text(chap);
             apply_drop_cap(&arena, chap);
+            apply_runin_headers(&arena, chap);
             let body = format_node(chap, &opts);
             let body = add_chapter_title_class(&body);
             let body = apply_scene_break_style(&body, scene_break);
@@ -154,6 +155,67 @@ fn drop_cap_paragraph<'a>(arena: &'a Arena<'a>, para: &'a AstNode<'a>) {
     drop(data);
     let span_node = arena.alloc(AstNode::from(NodeValue::HtmlInline(span)));
     first.insert_before(span_node);
+}
+
+/// Turn each chapter-level H4 into a run-in (paragraph) heading, mirroring the
+/// PDF `#runin-head`: the heading's inline content becomes a bold
+/// `<span class="runin">` lead-in merged into the front of the following
+/// paragraph (the `.runin` class supplies the trailing period + spacing via CSS,
+/// so both outputs match). When no paragraph follows, the H4 is retyped to a
+/// standalone run-in paragraph. Only direct children are visited, so an H4 nested
+/// in a blockquote keeps comrak's default `<h4>`.
+fn apply_runin_headers<'a>(arena: &'a Arena<'a>, chapter: &'a AstNode<'a>) {
+    let kids: Vec<&'a AstNode<'a>> = chapter.children().collect();
+    for (i, node) in kids.iter().enumerate() {
+        let is_h4 = matches!(&node.data.borrow().value, NodeValue::Heading(h) if h.level == 4);
+        if !is_h4 {
+            continue;
+        }
+        let into_para = kids
+            .get(i + 1)
+            .filter(|n| matches!(&n.data.borrow().value, NodeValue::Paragraph));
+        match into_para {
+            Some(para) => run_in_into(arena, node, para),
+            None => run_in_standalone(arena, node),
+        }
+    }
+}
+
+/// Move an H4's inline children, wrapped in `<span class="runin">`, to the front
+/// of `para`, then detach the (now empty) heading.
+fn run_in_into<'a>(arena: &'a Arena<'a>, heading: &'a AstNode<'a>, para: &'a AstNode<'a>) {
+    let (open, close) = runin_span(arena);
+    match para.first_child() {
+        Some(first) => first.insert_before(open),
+        None => para.append(open),
+    }
+    open.insert_after(close); // children slot in between, in order
+    for child in heading.children().collect::<Vec<_>>() {
+        child.detach();
+        close.insert_before(child);
+    }
+    heading.detach();
+}
+
+/// Wrap an H4's own inline children in `<span class="runin">` and retype the node
+/// to a paragraph (used when no paragraph follows the head).
+fn run_in_standalone<'a>(arena: &'a Arena<'a>, heading: &'a AstNode<'a>) {
+    let (open, close) = runin_span(arena);
+    match heading.first_child() {
+        Some(first) => first.insert_before(open),
+        None => heading.append(open),
+    }
+    heading.append(close);
+    heading.data.borrow_mut().value = NodeValue::Paragraph;
+}
+
+/// A fresh `<span class="runin">` open/close inline-HTML node pair.
+fn runin_span<'a>(arena: &'a Arena<'a>) -> (&'a AstNode<'a>, &'a AstNode<'a>) {
+    let open = arena.alloc(AstNode::from(NodeValue::HtmlInline(
+        "<span class=\"runin\">".to_string(),
+    )));
+    let close = arena.alloc(AstNode::from(NodeValue::HtmlInline("</span>".to_string())));
+    (open, close)
 }
 
 /// Synthesize the front-matter pages from the book metadata. Mirrors
@@ -388,6 +450,24 @@ mod tests {
 
         let blank = &render_chapters(md, SceneBreakStyle::Blank)[0].xhtml;
         assert!(blank.contains("scene-blank") && !blank.contains("<hr"));
+    }
+
+    #[test]
+    fn h4_becomes_runin_merged_into_paragraph() {
+        let md = "# Ch\n\n#### Background\n\nThe subsection body.\n";
+        let xhtml = &render_chapters(md, SceneBreakStyle::Auto)[0].xhtml;
+        assert!(xhtml.contains("<span class=\"runin\">Background</span>"));
+        // Merged into the following paragraph — no standalone <h4>.
+        assert!(!xhtml.contains("<h4"));
+        assert!(xhtml.contains("The subsection body."));
+    }
+
+    #[test]
+    fn h4_standalone_when_no_paragraph_follows() {
+        let md = "# Ch\n\n#### Background\n";
+        let xhtml = &render_chapters(md, SceneBreakStyle::Auto)[0].xhtml;
+        assert!(xhtml.contains("<span class=\"runin\">Background</span>"));
+        assert!(!xhtml.contains("<h4"));
     }
 
     #[test]

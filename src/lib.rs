@@ -1,6 +1,6 @@
 //! Argraver — a single-source book compiler.
 //!
-//! One Markdown manuscript + a standalone `_metadata.yml` in; an EPUB and a print
+//! One Markdown manuscript + a standalone `_argraver.yml` in; an EPUB and a print
 //! PDF out. The shape is a compiler: one comrak parse fanned out to two back ends
 //! (see `docs/DESIGN.md`).
 //!

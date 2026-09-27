@@ -17,7 +17,7 @@ use crate::render_html::{self, FrontMatter};
 const EPUB_CSS: &str = include_str!("resources/epub.css");
 
 /// Build an EPUB from a strip-fm'd manuscript and its metadata, writing it to
-/// `output`. `meta_dir` is the directory of the `_metadata.yml` (used to resolve
+/// `output`. `meta_dir` is the directory of the `_argraver.yml` (used to resolve
 /// a relative/vault-absolute cover path); pass `None` when there is no metadata.
 pub fn build(
     book: &Book,

@@ -25,6 +25,11 @@ h4 { font-size: 1.05em; }
 h5, h6 { font-size: 1em; }
 
 p { margin: 0; text-indent: 1.5em; }
+/* Run-in (paragraph) heading — H4. The bold lead-in opens the paragraph inline;
+   the period + spacing after it are supplied here so the source stays clean and
+   the PDF (`#runin-head`) and EPUB match. */
+.runin { font-weight: bold; }
+.runin::after { content: "."; padding-right: 0.4em; }
 /* First paragraph of a chapter / after a break is not indented. */
 h1 + p, h2 + p, h3 + p,
 .chapter-title + p,

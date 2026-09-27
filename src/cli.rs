@@ -1,7 +1,7 @@
 //! The `argraver` command line: `epub | pdf | all <manuscript.md> [out]`.
 //!
 //! Mirrors the bash `book` UX — project name from the manuscript filename,
-//! `_metadata.yml` auto-discovered (or `BOOK_META`), output defaulting beside
+//! `_argraver.yml` auto-discovered (or `BOOK_META`), output defaulting beside
 //! the input.
 
 use std::path::{Path, PathBuf};
@@ -15,7 +15,7 @@ use crate::{epub, ingest, pdf};
 #[command(
     name = "argraver",
     version,
-    about = "Single-source book compiler: one manuscript + _metadata.yml -> EPUB and PDF"
+    about = "Single-source book compiler: one manuscript + _argraver.yml -> EPUB and PDF"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -24,7 +24,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 enum Command {
-    /// Write a starter `_metadata.yml` into a directory.
+    /// Write a starter `_argraver.yml` into a directory.
     Init(InitArgs),
     /// Build an EPUB.
     Epub(BuildArgs),
@@ -38,9 +38,9 @@ enum Command {
 
 #[derive(clap::Args)]
 struct InitArgs {
-    /// Directory to write `_metadata.yml` into (default: current directory).
+    /// Directory to write `_argraver.yml` into (default: current directory).
     dir: Option<PathBuf>,
-    /// Overwrite an existing `_metadata.yml`.
+    /// Overwrite an existing `_argraver.yml`.
     #[arg(short, long)]
     force: bool,
 }
@@ -51,7 +51,7 @@ struct BuildArgs {
     manuscript: PathBuf,
     /// Output path. Defaults to the manuscript path with the format's extension.
     output: Option<PathBuf>,
-    /// Path to `_metadata.yml`. Overrides auto-discovery and `BOOK_META`.
+    /// Path to `_argraver.yml`. Overrides auto-discovery and `BOOK_META`.
     #[arg(short = 'm', long = "meta", value_name = "FILE")]
     meta: Option<PathBuf>,
 }
@@ -83,10 +83,10 @@ pub fn run() -> Result<()> {
     }
 }
 
-/// Write a starter `_metadata.yml` into the target directory.
+/// Write a starter `_argraver.yml` into the target directory.
 fn init(args: &InitArgs) -> Result<()> {
     let dir = args.dir.clone().unwrap_or_else(|| PathBuf::from("."));
-    let path = dir.join("_metadata.yml");
+    let path = dir.join("_argraver.yml");
     if path.exists() && !args.force {
         anyhow::bail!(
             "{} already exists (use --force to overwrite)",
@@ -144,7 +144,7 @@ fn build(args: &BuildArgs, target: Target, output: &Path) -> Result<()> {
             (m, dir)
         }
         None => {
-            eprintln!("  no _metadata.yml found; using defaults");
+            eprintln!("  no _argraver.yml found; using defaults");
             (ingest::Metadata::default(), None)
         }
     };

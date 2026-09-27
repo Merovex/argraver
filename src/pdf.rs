@@ -16,7 +16,7 @@ use crate::render_typst::{self, gutter_inside_in};
 
 /// Build a PDF from a strip-fm'd manuscript and its metadata.
 ///
-/// `meta_dir` is the directory of `_metadata.yml`; it becomes typst's `--root`
+/// `meta_dir` is the directory of `_argraver.yml`; it becomes typst's `--root`
 /// so image paths resolve the same way the EPUB cover does. The intermediate
 /// `.typ` is written beside `output` while compiling, then removed on success
 /// (kept on failure so the error can point at the generated markup; use the
